@@ -1,0 +1,9 @@
+[Unit]
+Description=EDAC monitor
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c "edac-mon -R"
+
+[Install]
+WantedBy=multi-user.target
