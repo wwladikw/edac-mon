@@ -5,7 +5,7 @@
  *
  */
 
-#define VERSION "1.0.0"
+#define VERSION "1.0.1"
 
 #define handle_error(msg) \
 	do { fprintf(stderr, "%s:%d: %s\n", __FUNCTION__, __LINE__, msg); \

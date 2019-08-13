@@ -46,11 +46,11 @@ Simple compilation on target:
 
 Cross compilation for example in case of ARM64:
 
-	make CROSS_COMPILE=aarch64-linux-gnu-
+	make CC=aarch64-linux-gnu-gcc
 
-Optional: pass CFLAGS_OPT to make
+Optional: pass CFLAGS to make
 
-	make CROSS_COMPILE=aarch64-linux-gnu- CFLAGS_OPT=-g
+	make CC=aarch64-linux-gnu-gcc CFLAGS=-g
 
 Installing:
 
