@@ -7,6 +7,7 @@
 
 #define _XOPEN_SOURCE 500
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -65,8 +66,8 @@ void get_edac_count_devices(struct edac_counter_device *ecd) {
 		handle_error_en(ENXIO, "No EDAC count devices found!");
 }
 
-int get_edac_value(char *path) {
-	int edac_value;
+uint32_t get_edac_value(char *path) {
+	uint32_t edac_value;
 	FILE *fp;
 
 	fp = fopen(path, "r");
@@ -79,28 +80,104 @@ int get_edac_value(char *path) {
 	return edac_value;
 }
 
+uint32_t get_edac_value_uint32(struct edac_counter_device *ecd) {
+	uint32_t edac_value;
+	int file, ret;
+
+	file = open(ecd->edac_count_ext_mem_path, O_RDONLY);
+	if (file < 0)
+		handle_error_en_opt(errno, "Failed to open: ", ecd->edac_count_ext_mem_path);
+
+	ret = read(file, (char *)&edac_value, 4);
+	if (ret < 0)
+		handle_error_en_opt(errno, "Failed to read: ", ecd->edac_count_ext_mem_path);
+
+	if (ret != 4) {
+		fprintf(stderr, "Broken uint32 content in %s\n"
+				"Read %d instead of 4 bytes!\n",
+				ecd->edac_count_ext_mem_path, ret);
+		ecd->reset_ext_mem = 1;
+	}
+
+	close(file);
+
+	return edac_value;
+}
+
+void write_edac_value_uint32(struct edac_counter_device *ecd,
+			    uint32_t edac_value, uint32_t repair_value) {
+	int file, ret;
+
+	file = open(ecd->edac_count_ext_mem_path, O_RDWR);
+	if (file < 0)
+		handle_error_en_opt(errno, "Failed to open: ", ecd->edac_count_ext_mem_path);
+
+	if (ecd->reset_ext_mem == 1) {
+		fprintf(stderr, "Try to reset %s\n"
+				"Writing current edac count val %u\n",
+				ecd->edac_count_ext_mem_path, repair_value);
+		ret = write(file, (char *)&repair_value, 4);
+		if (ret < 0)
+			handle_error_en_opt(errno, "Failed to write: ", ecd->edac_count_ext_mem_path);
+
+		ecd->reset_ext_mem = 0;
+		close(file);
+		return;
+	}
+
+	ret = write(file, (char *)&edac_value, 4);
+	if (ret < 0)
+		handle_error_en_opt(errno, "Failed to write: ", ecd->edac_count_ext_mem_path);
+
+	close(file);
+}
+
 void dump_edac_count_list(struct edac_counter_device *ecd) {
 	int i;
 
 	for (i = 0; i < ecd->dev_count; i++) {
-		printf("%s : %s = %d\n", ecd->edac_count_type, ecd->edac_count_list[i],
+		printf("%s : %s = %u\n", ecd->edac_count_type, ecd->edac_count_list[i],
 					 get_edac_value(ecd->edac_count_list[i]));
 	}
 }
 
-void update_edac_count_ext_mem(struct edac_counter_device *ecd, int edac_count_num) {
-	int edac_ext_mem_count;
+void dump_edac_count_ext_mem(struct edac_counter_device *ecd) {
+	uint32_t edac_value;
+
+	if (ecd->edac_count_ext_mem_path == NULL)
+		return;
+
+	if (store_as_uint32 == 0) {
+		edac_value = get_edac_value(ecd->edac_count_ext_mem_path);
+	} else {
+		edac_value = get_edac_value_uint32(ecd);
+		if (ecd->reset_ext_mem == 1)
+			write_edac_value_uint32(ecd, 0, 0);
+		edac_value = get_edac_value_uint32(ecd);
+	}
+	printf("EDAC: ext count: %s = %u\n", ecd->edac_count_ext_mem_path, edac_value);
+}
+
+void update_edac_count_ext_mem(struct edac_counter_device *ecd,
+			       uint32_t edac_count_num, uint32_t repair_value) {
+	uint32_t edac_ext_mem_count;
 	FILE *fp;
 
-	edac_ext_mem_count = get_edac_value(ecd->edac_count_ext_mem_path);
+	if (store_as_uint32 == 0) {
+		edac_ext_mem_count = get_edac_value(ecd->edac_count_ext_mem_path);
 
-	fp = fopen(ecd->edac_count_ext_mem_path, "w");
-	if (fp == NULL)
-		handle_error_en_opt(errno, "Failed to open: ", ecd->edac_count_ext_mem_path);
+		fp = fopen(ecd->edac_count_ext_mem_path, "w");
+		if (fp == NULL)
+			handle_error_en_opt(errno, "Failed to open: ", ecd->edac_count_ext_mem_path);
 
-	fprintf(fp, "%d", edac_ext_mem_count + edac_count_num);
-	fclose(fp);
-	printf("EDAC: updated external memory reference counter %s from %d to %d\n",
+		fprintf(fp, "%d", edac_ext_mem_count + edac_count_num);
+		fclose(fp);
+	} else {
+		edac_ext_mem_count = get_edac_value_uint32(ecd);
+		write_edac_value_uint32(ecd, edac_ext_mem_count + edac_count_num,
+					repair_value);
+	}
+	printf("EDAC: updated external memory reference counter %s from %d to %u\n",
 		ecd->edac_count_ext_mem_path, edac_ext_mem_count,
 		get_edac_value(ecd->edac_count_ext_mem_path));
 }
@@ -120,15 +197,17 @@ int inform_kmsg(void) {
 	return 0;
 }
 
-void handle_edac_failure(struct edac_counter_device *ecd, int edac_count_num, int dev_num) {
+void handle_edac_failure(struct edac_counter_device *ecd,
+			 uint32_t edac_count_num, uint32_t dev_num) {
 	int err;
+	uint32_t repair_value = get_edac_value(ecd->edac_count_list[dev_num]);
 
-	fprintf(stderr, "EDAC: occurence in %s : %s = %d\n",
+	fprintf(stderr, "EDAC: occurence in %s : %s = %u\n",
 		ecd->edac_count_type, ecd->edac_count_list[dev_num],
-		get_edac_value(ecd->edac_count_list[dev_num]));
+		repair_value);
 
 	if (ecd->edac_count_ext_mem_path != NULL)
-		update_edac_count_ext_mem(ecd, edac_count_num);
+		update_edac_count_ext_mem(ecd, edac_count_num, repair_value);
 
 	if (ecd->reboot_on_ue == 1) {
 		fprintf(stderr, "EDAC: ALERT: try to reboot the system due to Uncorrectable Error(s)!\n");
@@ -142,7 +221,10 @@ void handle_edac_failure(struct edac_counter_device *ecd, int edac_count_num, in
 }
 
 void check_edac_failures(struct edac_counter_device *ecd) {
-	int edac_count_ref[ecd->dev_count], i, edac_count_now;
+	int i;
+	uint32_t edac_count_ref[ecd->dev_count], edac_count_now;
+
+	dump_edac_count_ext_mem(ecd);
 
 	/* get values from first run to initialize reference value */
 	for (i = 0; i < ecd->dev_count; i++) {
@@ -215,6 +297,7 @@ void print_usage(char *argv[]) {
 	printf(" -R, --reboot                       Run in backgroung/polling mode and reboot the system on UE occurrence\n");
 	printf("     --ce_count_store=[PATH]        Sum CE occurence to another memory location\n");
 	printf("     --ue_count_store=[PATH]        Sum UE occurence to another memory location\n");
+	printf("     --store_as_uint32              Store EDAC occurence as 32 bit bytestream - use case could be a reference counter in Device Tree\n");
 	printf("     --poll_timeout_ce=[TIME]       Timeout in seconds to poll the EDAC CE counter devices for changes. Default is %ld sec\n", ce_poll_timeout_default);
 	printf("     --poll_timeout_ue=[TIME]       Timeout in seconds to poll the EDAC UE counter devices for changes. Default is %ld sec\n", ue_poll_timeout_default);
 	printf("     --add_sysfs_base_path=[PATH]   Add an additional base path for EDAC count devices. Default is %s\n", edac_sysfs_path);
@@ -228,7 +311,7 @@ int main(int argc, char *argv[]) {
 	struct edac_counter_device ce_dev;
 	struct edac_counter_device ue_dev;
 	pthread_t t_check_edac_ce_failures, t_check_edac_ue_failures;
-	const char *short_opt = "hloRv0:1:2:3:4:5:";
+	const char *short_opt = "hloRv0:1:2:3:4:5:6:";
 
 	struct option long_opt[] =
 	{
@@ -239,10 +322,11 @@ int main(int argc, char *argv[]) {
 		{"version",		   no_argument,		NULL, 'v'},
 		{"ce_count_store",	   required_argument,	NULL, '0'},
 		{"ue_count_store",	   required_argument,	NULL, '1'},
-		{"poll_timeout_ce",	   required_argument,	NULL, '2'},
-		{"poll_timeout_ue",	   required_argument,	NULL, '3'},
-		{"add_sysfs_base_path",	   required_argument,	NULL, '4'},
-		{"add_sysfs_search_depth", required_argument,	NULL, '5'},
+		{"store_as_uint32",	   no_argument,		NULL, '2'},
+		{"poll_timeout_ce",	   required_argument,	NULL, '3'},
+		{"poll_timeout_ue",	   required_argument,	NULL, '4'},
+		{"add_sysfs_base_path",	   required_argument,	NULL, '5'},
+		{"add_sysfs_search_depth", required_argument,	NULL, '6'},
 		{NULL,			   0,			NULL, 0}
 	};
 
@@ -259,6 +343,8 @@ int main(int argc, char *argv[]) {
 	ue_dev.oneshot = 0;
 	ce_dev.reboot_on_ue = 0;
 	ue_dev.reboot_on_ue = 0;
+	ce_dev.reset_ext_mem = 0;
+	ue_dev.reset_ext_mem = 0;
 
 	while((c = getopt_long(argc, argv, short_opt, long_opt, NULL)) != -1)
 	{
@@ -288,15 +374,18 @@ int main(int argc, char *argv[]) {
 				ue_dev.edac_count_ext_mem_path = optarg;
 				break;
 			case '2':
-				sscanf(optarg, "%ld", &ce_dev.dev_poll_timeout);
+				store_as_uint32 = 1;
 				break;
 			case '3':
-				sscanf(optarg, "%ld", &ue_dev.dev_poll_timeout);
+				sscanf(optarg, "%ld", &ce_dev.dev_poll_timeout);
 				break;
 			case '4':
-				add_sysfs_base_path = optarg;
+				sscanf(optarg, "%ld", &ue_dev.dev_poll_timeout);
 				break;
 			case '5':
+				add_sysfs_base_path = optarg;
+				break;
+			case '6':
 				sscanf(optarg, "%ld", &add_sysfs_search_depth);
 				break;
 			case ':':

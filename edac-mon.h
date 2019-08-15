@@ -5,7 +5,7 @@
  *
  */
 
-#define VERSION "1.0.1"
+#define VERSION "1.1.0"
 
 #define handle_error(msg) \
 	do { fprintf(stderr, "%s:%d: %s\n", __FUNCTION__, __LINE__, msg); \
@@ -24,13 +24,15 @@ char *add_sysfs_base_path = NULL;
 long add_sysfs_search_depth = 3;
 const long ce_poll_timeout_default = 120;
 const long ue_poll_timeout_default = 3;
+unsigned int store_as_uint32 = 0;
 
 struct edac_counter_device {
 	char **edac_count_list;
 	char *edac_count_ext_mem_path;
 	char edac_count_type[9];
-	unsigned int dev_count;
+	uint32_t dev_count;
 	unsigned int oneshot;
 	unsigned int reboot_on_ue;
+	unsigned int reset_ext_mem;
 	long dev_poll_timeout;
 };
