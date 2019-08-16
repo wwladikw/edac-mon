@@ -74,7 +74,7 @@ uint32_t get_edac_value(char *path) {
 	if (fp == NULL)
 		handle_error_en_opt(errno, "Failed to open: ", path);
 
-	fscanf(fp, "%d", &edac_value);
+	fscanf(fp, "%u", &edac_value);
 	fclose(fp);
 
 	return edac_value;
@@ -94,7 +94,7 @@ uint32_t get_edac_value_uint32(struct edac_counter_device *ecd) {
 
 	if (ret != 4) {
 		fprintf(stderr, "Broken uint32 content in %s\n"
-				"Read %d instead of 4 bytes!\n",
+				"Read %u instead of 4 bytes!\n",
 				ecd->edac_count_ext_mem_path, ret);
 		ecd->reset_ext_mem = 1;
 	}
@@ -161,25 +161,27 @@ void dump_edac_count_ext_mem(struct edac_counter_device *ecd) {
 void update_edac_count_ext_mem(struct edac_counter_device *ecd,
 			       uint32_t edac_count_num, uint32_t repair_value) {
 	uint32_t edac_ext_mem_count;
+	uint32_t edac_ext_mem_count_upd;
 	FILE *fp;
 
 	if (store_as_uint32 == 0) {
 		edac_ext_mem_count = get_edac_value(ecd->edac_count_ext_mem_path);
-
+		edac_ext_mem_count_upd = edac_ext_mem_count + edac_count_num;
 		fp = fopen(ecd->edac_count_ext_mem_path, "w");
 		if (fp == NULL)
 			handle_error_en_opt(errno, "Failed to open: ", ecd->edac_count_ext_mem_path);
 
-		fprintf(fp, "%d", edac_ext_mem_count + edac_count_num);
+		fprintf(fp, "%u", edac_ext_mem_count_upd);
 		fclose(fp);
 	} else {
 		edac_ext_mem_count = get_edac_value_uint32(ecd);
-		write_edac_value_uint32(ecd, edac_ext_mem_count + edac_count_num,
+		edac_ext_mem_count_upd = edac_ext_mem_count + edac_count_num;
+		write_edac_value_uint32(ecd, edac_ext_mem_count_upd,
 					repair_value);
 	}
-	printf("EDAC: updated external memory reference counter %s from %d to %u\n",
+	printf("EDAC: updated external memory reference counter %s from %u to %u\n",
 		ecd->edac_count_ext_mem_path, edac_ext_mem_count,
-		get_edac_value(ecd->edac_count_ext_mem_path));
+		edac_ext_mem_count_upd);
 }
 
 int inform_kmsg(void) {
