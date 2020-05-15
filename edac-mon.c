@@ -22,6 +22,7 @@
 #include <linux/reboot.h>
 #include <sys/reboot.h>
 #include <sys/syscall.h>
+#include <arpa/inet.h>
 #include "edac-mon.h"
 
 void get_edac_count_devices(struct edac_counter_device *ecd) {
@@ -92,6 +93,8 @@ uint32_t get_edac_value_uint32(struct edac_counter_device *ecd) {
 	if (ret < 0)
 		handle_error_en_opt(errno, "Failed to read: ", ecd->edac_count_ext_mem_path);
 
+	edac_value = ntohl(edac_value);
+
 	if (ret != 4) {
 		fprintf(stderr, "Broken uint32 content in %s\n"
 				"Read %u instead of 4 bytes!\n",
@@ -125,6 +128,7 @@ void write_edac_value_uint32(struct edac_counter_device *ecd,
 		return;
 	}
 
+	edac_value = htonl(edac_value);
 	ret = write(file, (char *)&edac_value, 4);
 	if (ret < 0)
 		handle_error_en_opt(errno, "Failed to write: ", ecd->edac_count_ext_mem_path);
@@ -299,7 +303,7 @@ void print_usage(char *argv[]) {
 	printf(" -R, --reboot                       Run in backgroung/polling mode and reboot the system on UE occurrence\n");
 	printf("     --ce_count_store=[PATH]        Sum CE occurence to another memory location\n");
 	printf("     --ue_count_store=[PATH]        Sum UE occurence to another memory location\n");
-	printf("     --store_as_uint32              Store EDAC occurence as 32 bit bytestream - use case could be a reference counter in Device Tree\n");
+	printf("     --store_as_uint32              Store EDAC occurence as 32 bit bytestream in network byte order - use case could be a reference counter in Device Tree\n");
 	printf("     --poll_timeout_ce=[TIME]       Timeout in seconds to poll the EDAC CE counter devices for changes. Default is %ld sec\n", ce_poll_timeout_default);
 	printf("     --poll_timeout_ue=[TIME]       Timeout in seconds to poll the EDAC UE counter devices for changes. Default is %ld sec\n", ue_poll_timeout_default);
 	printf("     --add_sysfs_base_path=[PATH]   Add an additional base path for EDAC count devices. Default is %s\n", edac_sysfs_path);
